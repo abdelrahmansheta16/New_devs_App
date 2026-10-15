@@ -100,6 +100,15 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Supabase connection pool initialization failed: {e}")
         # Continue startup - fallback to direct connections
 
+    # Initialize the Postgres pool used for revenue queries
+    try:
+        from .core.database_pool import db_pool
+
+        await db_pool.initialize()
+    except Exception as e:
+        logger.error(f"❌ Database pool initialization failed: {e}")
+        # Continue startup - requests retry initialization
+
     # Initialize Redis connection with timeout
     try:
         await redis_client.initialize()
@@ -126,6 +135,14 @@ async def lifespan(app: FastAPI):
     # Shutdown async processor
     await async_processor.shutdown()
     logger.info("Async processor shutdown completed")
+
+    # Close Postgres pool
+    try:
+        from .core.database_pool import db_pool
+
+        await db_pool.close()
+    except Exception as e:
+        logger.warning(f"⚠️ Error closing database pool: {e}")
 
     # Close connection pool
     try:
