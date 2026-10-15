@@ -1,47 +1,74 @@
 import React, { useEffect, useState } from 'react';
 import { SecureAPI } from '../lib/secureApi';
 
+const MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+];
+
 interface RevenueData {
     property_id: string;
-    total_revenue: number;
+    // Exact decimal string already rounded half-up to cents by the API (e.g. "2250.00").
+    // Never round it again with float math in the browser.
+    total_revenue: string;
     currency: string;
     reservations_count: number;
+    month?: number | null;
+    year?: number | null;
 }
 
 interface RevenueSummaryProps {
-    propertyId?: string;
-    debugTenant?: string; 
+    propertyId: string;
+    month?: number;
+    year?: number;
     showRaw?: boolean;
 }
 
-export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'prop-001', debugTenant, showRaw }) => {
+const formatMoney = (amount: string, currency: string) => {
+    try {
+        return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(Number(amount));
+    } catch {
+        // Unknown currency code: fall back to the plain amount
+        return `${currency} ${amount}`;
+    }
+};
+
+export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId, month, year, showRaw }) => {
     const [data, setData] = useState<RevenueData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    const activeTenant = debugTenant || 'candidate';
-
     useEffect(() => {
+        // Ignore responses from a previous property/period so a slow request can't overwrite the current one
+        let cancelled = false;
+
         const fetchRevenue = async () => {
             setLoading(true);
+            setError('');
+            setData(null);
             try {
-                // Use SecureAPI to handle authentication automatically
-                // We pass the simulatedTenant option which SecureAPI will attach as a header
+                // The tenant is derived from the auth token on the backend
                 const response = await SecureAPI.getDashboardSummary(propertyId, {
-                    simulatedTenant: activeTenant,
+                    month,
+                    year,
                     timestamp: Date.now()
                 });
-                setData(response);
+                if (!cancelled) setData(response);
             } catch (err) {
-                setError('Failed to load revenue data');
-                console.error(err);
+                if (!cancelled) {
+                    setError('Failed to load revenue data');
+                    console.error(err);
+                }
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
 
         fetchRevenue();
-    }, [propertyId, activeTenant]);
+        return () => {
+            cancelled = true;
+        };
+    }, [propertyId, month, year]);
 
     if (loading) {
         return (
@@ -59,9 +86,10 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'pr
     }
 
     if (error) return <div className="p-4 text-red-500 bg-red-50 rounded-lg">{error}</div>;
-    if (!data) return null;
+    if (!data || data.property_id !== propertyId) return null;
 
-    const displayTotal = Math.round(data.total_revenue * 100) / 100;
+    const displayTotal = formatMoney(data.total_revenue, data.currency);
+    const periodLabel = data.month && data.year ? `${MONTH_NAMES[data.month - 1]} ${data.year}` : 'All time';
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-300">
@@ -75,10 +103,10 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'pr
             <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
                     <div>
-                        <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Revenue</h2>
+                        <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Revenue &middot; {periodLabel}</h2>
                         <div className="flex items-baseline gap-2 mt-1">
                             <span className="text-3xl font-bold text-gray-900 tracking-tight">
-                                {data.currency} {displayTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {displayTotal}
                             </span>
                             {/* Fake trend indicator for premium feel */}
                             <span className="inline-flex items-baseline px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 md:mt-2 lg:mt-0">
@@ -100,18 +128,6 @@ export const RevenueSummary: React.FC<RevenueSummaryProps> = ({ propertyId = 'pr
                         <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">Reservations</p>
                         <p className="text-sm font-semibold text-gray-700 mt-1">{data.reservations_count} <span className="font-normal text-gray-400">bookings</span></p>
                     </div>
-                </div>
-
-                {/* Precision Warning Area */}
-                <div className="mt-4 h-6">
-                    {Math.abs(data.total_revenue - displayTotal) > 0.000001 && showRaw && (
-                        <div className="flex items-center text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
-                            <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                            Precision Mismatch Detected
-                        </div>
-                    )}
                 </div>
             </div>
         </div>
