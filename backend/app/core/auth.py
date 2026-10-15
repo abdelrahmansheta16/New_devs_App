@@ -127,6 +127,10 @@ async def authenticate_request(
                 user = MockUser(payload)
                 
             except JWTError:
+                # Without a real Supabase project the fallback client accepts a hardcoded
+                # "mock-token-123" and unsigned JWTs, so only verified tokens are allowed.
+                if not settings.supabase_url:
+                    raise
                 # If custom JWT fails, try Supabase auth
                 response = supabase.auth.get_user(token)
                 user = response.user
@@ -252,8 +256,11 @@ async def authenticate_request(
         logger.info(f"==================== TENANT ID EXTRACTION ====================")
         logger.info(f"User: {user.email} (ID: {user.id})")
 
-        # Use TenantResolver for comprehensive tenant resolution
-        tenant_id = await TenantResolver.resolve_tenant_id(token=token, user_id=user.id, user_email=user.email)
+        # Prefer the tenant claim from the verified token (or server-side user record),
+        # then fall back to the TenantResolver mapping
+        tenant_id = (getattr(user, "app_metadata", None) or {}).get("tenant_id") or await TenantResolver.resolve_tenant_id(
+            token=token, user_id=user.id, user_email=user.email
+        )
 
         # If we found a tenant_id and it's not in the user's metadata, update it for next time
         current_tenant_in_metadata = None

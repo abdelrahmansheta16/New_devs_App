@@ -99,6 +99,14 @@ async def login(request: LoginRequest):
                 }
             )
         
+        # Challenge mode has no password store, so only the static client accounts above may log in
+        if not settings.supabase_url:
+            logger.warning(f"[LOGIN] Rejected login for {email}: no password verification available")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
+
         # For other users, check if they exist in the database
         # This is a simplified auth - in production you'd check password hashes
         try:
